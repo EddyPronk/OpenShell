@@ -120,7 +120,7 @@ another of the same architecture, copy `claude-vault/dist/<arch>/` along with th
 
 **Without building:** the fork's *Claude vault build* workflow builds the same files for amd64
 and arm64 on every push. Download the `claude-vault-<arch>` artifact of a run, unzip it into
-`claude-vault/` (it holds `dist/<arch>/`) and run `claude-vault/install-deb.sh`. Use the
+`claude-vault/dist/` (it holds an `<arch>/` directory) and run `claude-vault/install-deb.sh`. Use the
 artifact of the commit you checked out: the installer takes the policy and profiles from the
 checkout.
 

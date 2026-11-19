@@ -4,7 +4,7 @@
 # the repo's Nix dev shell (from upstream's public Cachix cache), then
 # claude-vault/deb/build-in-nix.sh.
 #
-# Each run uploads one artifact per architecture, laid out as claude-vault/dist/<arch>/.
+# Each run uploads one artifact per architecture holding <arch>/, to unzip into claude-vault/dist/.
 # A claude-vault-v* tag also attaches the files to a GitHub release.
 
 name: Claude vault build
