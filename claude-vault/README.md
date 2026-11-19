@@ -118,6 +118,24 @@ The build caches live in the podman volumes `openshell-deb-nix`, `openshell-deb-
 `openshell-deb-target`; keep them for fast rebuilds. To build on one machine and install on
 another of the same architecture, copy `claude-vault/dist/<arch>/` along with the checkout.
 
+**Without building:** the fork's *Claude vault build* workflow builds the same files for amd64
+and arm64 on every push. Download the `claude-vault-<arch>` artifact of a run, unzip it into
+`claude-vault/` (it holds `dist/<arch>/`) and run `claude-vault/install-deb.sh`. Use the
+artifact of the commit you checked out: the installer takes the policy and profiles from the
+checkout.
+
+**With Nix:** skip the builder container and build in the repo's dev shell directly:
+
+```shell
+CARGO_VERSION=$(claude-vault/deb/version.sh) \
+    nix develop -c bash claude-vault/deb/build-in-nix.sh inner
+```
+
+This writes the `.deb` and binaries to `claude-vault/dist/<arch>/` and changes the version in
+`Cargo.toml` (as a release build does; `git checkout Cargo.toml` afterwards). The images are
+then built from `dist/<arch>/bin` with `deb/Containerfile.supervisor` and
+`deb/Containerfile.sandbox`, as in `build-deb.sh` steps 3 and 4.
+
 Running sandboxes keep their old supervisor: recreate them after an install.
 
 **Back to the official package:** `sudo apt install --allow-downgrades openshell=<version>`,

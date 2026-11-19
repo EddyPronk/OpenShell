@@ -1,0 +1,114 @@
+# Fork-only workflow (branch feature/claude-subscription-flow): builds the .deb and the
+# supervisor and sandbox images that claude-vault/install-deb.sh installs, on GitHub's
+# own runners. Same build as claude-vault/build-deb.sh, without the builder container:
+# the repo's Nix dev shell (from upstream's public Cachix cache), then
+# claude-vault/deb/build-in-nix.sh.
+#
+# Each run uploads one artifact per architecture, laid out as claude-vault/dist/<arch>/.
+# A claude-vault-v* tag also attaches the files to a GitHub release.
+
+name: Claude vault build
+
+on:
+  push:
+    branches: [feature/claude-subscription-flow]
+    tags: ["claude-vault-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-vault-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/local/julia* /usr/share/swift
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The version is counted from upstream's latest vX.Y.Z tag, which forks don't copy.
+      - name: Fetch upstream release tags
+        run: git fetch --no-tags https://github.com/NVIDIA/OpenShell.git '+refs/tags/v*:refs/tags/v*'
+
+      - name: Version
+        id: version
+        run: |
+          cargo_version=$(claude-vault/deb/version.sh)
+          echo "cargo=$cargo_version" >> "$GITHUB_OUTPUT"
+          echo "image-tag=claude-vault-${cargo_version//+/-}" >> "$GITHUB_OUTPUT"
+          echo "$cargo_version"
+
+      - uses: ./.github/actions/setup-nix
+        with:
+          prepare-shell: "true"
+
+      - name: Build binaries and .deb
+        shell: nix develop -c bash -euo pipefail {0}
+        env:
+          CARGO_VERSION: ${{ steps.version.outputs.cargo }}
+          OUT_DIR: ${{ github.workspace }}/dist/${{ matrix.arch }}
+        run: bash claude-vault/deb/build-in-nix.sh inner
+
+      - name: Build images
+        env:
+          ARCH: ${{ matrix.arch }}
+          IMAGE_TAG: ${{ steps.version.outputs.image-tag }}
+        run: |
+          out=dist/$ARCH
+          docker build -f claude-vault/deb/Containerfile.supervisor \
+            -t "localhost/openshell/supervisor:$IMAGE_TAG" "$out/bin"
+          docker save -o "$out/openshell-supervisor_${IMAGE_TAG}_$ARCH.tar" \
+            "localhost/openshell/supervisor:$IMAGE_TAG"
+          docker build -f claude-vault/deb/Containerfile.sandbox \
+            -t "localhost/openshell/sandbox:$IMAGE_TAG" "$out/bin"
+          docker save -o "$out/openshell-sandbox_${IMAGE_TAG}_$ARCH.tar" \
+            "localhost/openshell/sandbox:$IMAGE_TAG"
+          rm -rf "$out/bin"
+          ls -lh "$out"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: claude-vault-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/claude-vault-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          prerelease: true
+          files: artifacts/*/*

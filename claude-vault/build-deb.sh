@@ -16,8 +16,8 @@
 #   bin/                                       the six built binaries
 #
 # Steps:
-#   1. Version from git, as openshell-core/build.rs computes it: latest vX.Y.Z tag,
-#      next patch, commits since, short sha -> 0.1.9-dev.25+g0ad0c122b.
+#   1. Version from git (deb/version.sh), as openshell-core/build.rs computes it:
+#      latest vX.Y.Z tag, next patch, commits since, short sha -> 0.1.9-dev.25+g0ad0c122b.
 #   2. deb/build-in-nix.sh in the builder image (deb/Containerfile.builder: Ubuntu
 #      24.04 with Nix, like the release's Linux runners with setup-nix): the same build as a
 #      GitHub release (the repo's Nix dev shell, cargo auditable build per binary,
@@ -54,15 +54,7 @@ if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no -- crates pro
 fi
 
 # 1. Version.
-tag=$(git -C "$REPO" describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*')
-distance=$(git -C "$REPO" rev-list --count "$tag..HEAD")
-sha=$(git -C "$REPO" rev-parse --short=9 HEAD)
-IFS=. read -r major minor patch <<<"${tag#v}"
-if [[ "$distance" -eq 0 ]]; then
-    cargo_version="${tag#v}"
-else
-    cargo_version="$major.$minor.$((patch + 1))-dev.$distance+g$sha"
-fi
+cargo_version=$("$HERE/deb/version.sh" "$REPO")
 image_tag="claude-vault-${cargo_version//+/-}"
 echo "==> $ARCH, version $cargo_version, supervisor tag $image_tag"
 
