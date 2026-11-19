@@ -4176,6 +4176,16 @@ pub(super) async fn handle_update_provider(
     let workspace = super::workspace::resolve_workspace(state.store.as_ref(), &authz.workspace)
         .await?
         .name;
+    update_provider_in_workspace(state, workspace, req).await
+}
+
+/// Personal patch (Claude vault sign-in): the body of [`handle_update_provider`]
+/// for a workspace the caller is already authorized for.
+pub(super) async fn update_provider_in_workspace(
+    state: &Arc<ServerState>,
+    workspace: String,
+    req: UpdateProviderRequest,
+) -> Result<Response<ProviderResponse>, Status> {
     // Provider material contributes to the route-report configuration epoch.
     // Serialize its mutation with route-status validation so a report derived
     // from the prior revision cannot commit after this update. The workspace
@@ -4941,6 +4951,17 @@ pub(super) async fn handle_configure_provider_refresh(
     let workspace = super::workspace::resolve_workspace(state.store.as_ref(), &authz.workspace)
         .await?
         .name;
+    configure_provider_refresh_in_workspace(state, workspace, request, replay_facts).await
+}
+
+/// Personal patch (Claude vault sign-in): the body of
+/// [`handle_configure_provider_refresh`] for an already authorized workspace.
+pub(super) async fn configure_provider_refresh_in_workspace(
+    state: &Arc<ServerState>,
+    workspace: String,
+    request: ConfigureProviderRefreshRequest,
+    replay_facts: super::mutation_replay::ordinary::Facts,
+) -> Result<Response<ConfigureProviderRefreshResponse>, Status> {
     let provider_name = request.provider.trim();
     let credential_key = request.credential_key.trim();
     if provider_name.is_empty() {
@@ -5434,6 +5455,16 @@ pub(super) async fn handle_delete_provider_refresh(
     let workspace = super::workspace::resolve_workspace(state.store.as_ref(), &authz.workspace)
         .await?
         .name;
+    delete_provider_refresh_in_workspace(state, workspace, request).await
+}
+
+/// Personal patch (Claude vault sign-in): the body of
+/// [`handle_delete_provider_refresh`] for an already authorized workspace.
+pub(super) async fn delete_provider_refresh_in_workspace(
+    state: &Arc<ServerState>,
+    workspace: String,
+    request: DeleteProviderRefreshRequest,
+) -> Result<Response<DeleteProviderRefreshResponse>, Status> {
     let provider_name = request.provider.trim();
     let credential_key = request.credential_key.trim();
     if provider_name.is_empty() {
@@ -7406,6 +7437,9 @@ mod tests {
                 "aws-bedrock",
                 "aws-s3",
                 "claude-code",
+                // Personal patch: the Claude vault profiles in providers/.
+                "claude-code-sandbox-login",
+                "claude-code-shared-login",
                 "codex",
                 "copilot",
                 "cursor",

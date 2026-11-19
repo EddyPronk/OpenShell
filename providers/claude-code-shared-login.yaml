@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Personal patch: Claude Code with a subscription login, "shared login" mode of
+# the supervisor's Claude vault (crates/openshell-supervisor-network/src/l7/claude_vault.rs).
+# One grant per gateway serves every sandbox that has this provider.
+#
+#   OPENSHELL_CLAUDE_VAULT=on mise run gateway:podman
+#   openshell provider profile import -f providers/claude-code-shared-login.yaml
+#   openshell provider create --name claude-shared --type claude-code-shared-login
+#   openshell sandbox create --provider claude-shared ...   # then /login once in Claude Code
+#
+# The first /login in any sandbox with this provider gives the grant to the
+# gateway (allowed by the sign-in annotation below); later sandboxes start signed
+# in. A new /login replaces the grant, e.g. after reauthorization_required.
+#
+# The gateway holds the grant: CLAUDE_ACCESS_TOKEN, and the refresh token as
+# refresh material. Its credential issuer is the only party that refreshes it
+# upstream. Each supervisor reads the current token, swaps it for Claude Code's
+# ghost token, answers Claude Code's refreshes, sign-ins and /logout locally,
+# and keeps CLAUDE_ACCESS_TOKEN out of the sandbox's environment.
+
+id: claude-code-shared-login
+annotations:
+  # Policy: a sandbox with this provider attached may supply the grant for this
+  # credential by signing in (/login) there; the gateway checks it.
+  claude-vault.openshell.dev/sign-in: CLAUDE_ACCESS_TOKEN
+display_name: Claude Code (subscription, shared login)
+description: Claude Code CLI with one OAuth subscription login held and refreshed by the gateway
+category: agent
+inference_capable: true
+credentials:
+  - name: CLAUDE_ACCESS_TOKEN
+    description: Claude subscription OAuth access token (only the supervisor's vault uses it)
+    env_vars: [CLAUDE_ACCESS_TOKEN]
+    # Not required: the provider is created empty and filled by a sandbox sign-in.
+    required: false
+    refresh:
+      strategy: oauth2_refresh_token
+      token_url: https://platform.claude.com/v1/oauth/token
+      refresh_before_seconds: 1800
+      # Anthropic issues 8 h access tokens; the gateway caps at 1 h unless told.
+      # Pinned into the refresh state by `provider refresh configure`.
+      max_lifetime_seconds: 28800
+      material:
+        - name: client_id
+          required: true
+        - name: refresh_token
+          required: true
+          secret: true
+endpoints:
+  - host: api.anthropic.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: platform.claude.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: mcp-proxy.anthropic.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+# curl fetches the ghost credentials file (claude-vault.sh) from the vault.
+binaries: [/usr/local/bin/claude, /usr/bin/curl]

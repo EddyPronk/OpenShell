@@ -698,6 +698,28 @@ impl ProviderCredentialState {
             .map(str::to_string)
     }
 
+    /// Personal patch (Claude vault, shared login): the current value of KEY,
+    /// its expiry in epoch milliseconds (if known) and the snapshot revision,
+    /// for trusted supervisor code only. Works for keys suppressed from the
+    /// child environment with [`Self::remove_env_key`]; the value never goes
+    /// to the workload.
+    pub fn current_secret_for_env_key(&self, key: &str) -> Option<(String, Option<i64>, u64)> {
+        let inner = self
+            .inner
+            .read()
+            .expect("provider credential state poisoned");
+        let resolver = inner.current_resolver.as_ref()?;
+        let value = resolver
+            .resolve_current_env_key_checked(key, "claude_vault")
+            .ok()
+            .flatten()?
+            .to_string();
+        let expires_at_ms = resolver
+            .expires_at_ms_for_placeholder(&crate::secrets::placeholder_for_env_key(key))
+            .filter(|ms| *ms > 0);
+        Some((value, expires_at_ms, inner.current.revision))
+    }
+
     /// Return the GCP token placeholder and its remaining lifetime in seconds.
     ///
     /// Searches `google_cloud::TOKEN_ENV_KEYS` in priority order (SA before
@@ -3756,6 +3778,35 @@ mod tests {
             !state.snapshot().child_env.contains_key("GCE_METADATA_HOST"),
             "suppressed key must not reappear after install_environment"
         );
+    }
+
+    #[test]
+    fn current_secret_for_suppressed_key_follows_new_revisions() {
+        let state = ProviderCredentialState::from_environment(
+            1,
+            HashMap::from([("CLAUDE_ACCESS_TOKEN".to_string(), "first".to_string())]),
+            HashMap::from([("CLAUDE_ACCESS_TOKEN".to_string(), 4_000_000_000_000)]),
+            HashMap::new(),
+        );
+        state.remove_env_key("CLAUDE_ACCESS_TOKEN");
+        assert!(!state.snapshot().child_env.contains_key("CLAUDE_ACCESS_TOKEN"));
+        assert_eq!(
+            state.current_secret_for_env_key("CLAUDE_ACCESS_TOKEN"),
+            Some(("first".to_string(), Some(4_000_000_000_000), 1))
+        );
+
+        state.install_environment(
+            2,
+            HashMap::from([("CLAUDE_ACCESS_TOKEN".to_string(), "second".to_string())]),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        assert!(!state.snapshot().child_env.contains_key("CLAUDE_ACCESS_TOKEN"));
+        assert_eq!(
+            state.current_secret_for_env_key("CLAUDE_ACCESS_TOKEN"),
+            Some(("second".to_string(), None, 2))
+        );
+        assert_eq!(state.current_secret_for_env_key("OTHER"), None);
     }
 
     #[test]

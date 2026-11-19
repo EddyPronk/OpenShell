@@ -19,6 +19,7 @@ use hyper_util::{
 use metrics::{counter, histogram};
 use openshell_core::proto::open_shell_server::OpenShellServer;
 use openshell_core::proto::sandbox_updates_server::SandboxUpdatesServer;
+use openshell_core::proto::claude_vault_server::ClaudeVaultServer;
 use openshell_core::proto::supervisor_host::v1::supervisor_host_server::SupervisorHostServer;
 use openshell_core::{
     Config,
@@ -305,6 +306,15 @@ impl MultiplexService {
             .max_decoding_message_size(MAX_GRPC_DECODE_SIZE),
             openshell,
         );
+        // Personal patch: the Claude vault sign-in service, behind the same
+        // authentication router (sandbox principals only, per its proto option).
+        let openshell = ClaudeVaultRoute {
+            vault: ClaudeVaultServer::new(crate::grpc::claude_vault::ClaudeVaultService::new(
+                self.state.clone(),
+            ))
+            .max_decoding_message_size(MAX_GRPC_DECODE_SIZE),
+            gateway: openshell,
+        };
         let reflection = self.state.reflection_service.clone();
         let sandbox_updates = SandboxUpdatesServer::new(OpenShellService::new(self.state.clone()))
             .max_decoding_message_size(MAX_GRPC_DECODE_SIZE);
@@ -431,6 +441,47 @@ where
             let mut host = self.host.clone();
             Box::pin(async move {
                 <SupervisorHostServer<_> as tower::Service<Request<BoxBody>>>::call(&mut host, req)
+                    .await
+            })
+        } else {
+            let mut gateway = self.gateway.clone();
+            Box::pin(async move { gateway.ready().await?.call(req).await })
+        }
+    }
+}
+
+/// Personal patch: sends `ClaudeVault` calls to that service, everything else on.
+#[derive(Clone)]
+struct ClaudeVaultRoute<N> {
+    vault: ClaudeVaultServer<crate::grpc::claude_vault::ClaudeVaultService>,
+    gateway: N,
+}
+
+impl<N> tower::Service<Request<BoxBody>> for ClaudeVaultRoute<N>
+where
+    N: tower::Service<Request<BoxBody>, Response = Response<tonic::body::Body>, Error = Infallible>
+        + Clone
+        + Send
+        + 'static,
+    N::Future: Send + 'static,
+{
+    type Response = Response<tonic::body::Body>;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.gateway.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<BoxBody>) -> Self::Future {
+        if req
+            .uri()
+            .path()
+            .starts_with(crate::grpc::claude_vault::CLAUDE_VAULT_PATH_PREFIX)
+        {
+            let mut vault = self.vault.clone();
+            Box::pin(async move {
+                <ClaudeVaultServer<_> as tower::Service<Request<BoxBody>>>::call(&mut vault, req)
                     .await
             })
         } else {

@@ -309,6 +309,8 @@ pub async fn run_networking(
         denial_log,
         proxy_tls,
     } = instance;
+    // Personal patch: the Claude vault submits recorded sign-ins to the gateway.
+    crate::l7::claude_vault::set_gateway(gateway.clone(), sandbox_id.clone());
     let token_grants = SpiffeTokenGrantResolver::new(SandboxInstanceTokenGrants::new(
         gateway.clone(),
         sandbox_id.clone(),

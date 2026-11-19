@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Personal patch: Claude Code with a subscription login, "sandbox login" mode of
+# the supervisor's Claude vault (crates/openshell-supervisor-network/src/l7/claude_vault.rs).
+# Each sandbox signs in on its own; see claude-code-shared-login.yaml for one
+# sign-in shared by every sandbox.
+#
+#   OPENSHELL_CLAUDE_VAULT=on mise run gateway:podman
+#   openshell provider profile import -f providers/claude-code-sandbox-login.yaml
+#   openshell provider create --name claude-own --type claude-code-sandbox-login
+#   openshell sandbox create --provider claude-own ...
+#
+# The profile only opens the Anthropic endpoints. The vault is switched on by
+# OPENSHELL_CLAUDE_VAULT=on in the gateway's environment, which the podman driver
+# copies to each supervisor; nothing appears in the sandbox's environment. Claude
+# Code signs in with /login inside the sandbox; the supervisor keeps the real
+# tokens and the sandbox only ever sees ghost tokens.
+
+id: claude-code-sandbox-login
+display_name: Claude Code (subscription, sandbox login)
+description: Claude Code CLI with an OAuth subscription login kept by the sandbox's supervisor
+category: agent
+inference_capable: true
+credentials: []
+endpoints:
+  - host: api.anthropic.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: platform.claude.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+  - host: mcp-proxy.anthropic.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries: [/usr/local/bin/claude]

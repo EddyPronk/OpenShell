@@ -4,6 +4,8 @@
 //! gRPC service implementation.
 
 mod auth_rpc;
+/// Personal patch: Claude vault sign-in service (`proto/claude_vault.proto`).
+pub mod claude_vault;
 pub mod mutation_replay;
 pub mod policy;
 pub mod provider;

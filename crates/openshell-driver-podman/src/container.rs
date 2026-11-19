@@ -663,6 +663,10 @@ fn network_trust_generation(network_trust: Option<&NetworkSupervisorTrustBundle>
     })
 }
 
+/// Switch for the supervisor's Claude vault (personal patch; see
+/// `openshell-supervisor-network/src/l7/claude_vault.rs`).
+const CLAUDE_VAULT_SWITCH: &str = "OPENSHELL_CLAUDE_VAULT";
+
 fn build_env(
     sandbox: &DriverSandbox,
     config: &PodmanComputeConfig,
@@ -738,6 +742,12 @@ fn build_env(
         openshell_core::sandbox_env::TELEMETRY_ENABLED.into(),
         openshell_core::telemetry::enabled_env_value().into(),
     );
+    // Personal patch: the supervisor's Claude vault switch comes from the
+    // gateway's environment only; sandbox and template environment only reach
+    // the workload (through USER_ENVIRONMENT).
+    if let Ok(value) = std::env::var(CLAUDE_VAULT_SWITCH) {
+        env.insert(CLAUDE_VAULT_SWITCH.into(), value);
+    }
     env.extend(
         config
             .supervisor_otlp
@@ -3045,6 +3055,33 @@ mod tests {
                 );
             },
         );
+    }
+
+    #[test]
+    fn container_spec_claude_vault_switch_comes_from_driver_env() {
+        use openshell_core::proto::compute::v1::{DriverSandboxSpec, DriverSandboxTemplate};
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        let spec_with = |user_value: &str| {
+            let mut sandbox = test_sandbox("test-id", "legit-name");
+            sandbox.spec = Some(DriverSandboxSpec {
+                environment: std::collections::HashMap::from([(
+                    CLAUDE_VAULT_SWITCH.to_string(),
+                    user_value.to_string(),
+                )]),
+                template: Some(DriverSandboxTemplate::default()),
+                ..Default::default()
+            });
+            build_container_spec(&sandbox, &test_config())
+        };
+        temp_env::with_vars([(CLAUDE_VAULT_SWITCH, Some("on"))], || {
+            let spec = spec_with("off");
+            assert_eq!(spec["env"][CLAUDE_VAULT_SWITCH].as_str(), Some("on"));
+        });
+        temp_env::with_vars([(CLAUDE_VAULT_SWITCH, None::<&str>)], || {
+            let spec = spec_with("on");
+            assert!(spec["env"].get(CLAUDE_VAULT_SWITCH).is_none());
+        });
     }
 
     #[test]

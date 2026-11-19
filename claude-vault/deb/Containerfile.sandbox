@@ -1,0 +1,9 @@
+# The sandbox runtime image: upstream's deploy/docker/Dockerfile.sandbox with the
+# static openshell-sandbox binary built by build-in-nix.sh. The gateway mounts it
+# into each sandbox as the workload launcher. COPY only.
+#
+# Build context: the directory holding the built openshell-sandbox.
+FROM scratch
+COPY --chmod=0555 openshell-sandbox /openshell-sandbox
+USER 65532:65532
+ENTRYPOINT ["/openshell-sandbox"]

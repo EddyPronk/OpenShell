@@ -1,0 +1,21 @@
+# Claude Code + tmux for an OpenShell sandbox (podman compute driver).
+FROM docker.io/library/ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git tmux less procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Native installer (a real binary, so OpenShell's per-binary policy can match it),
+# copied to /usr/local/bin/claude, a path the claude-code provider profile names.
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
+    && rm -rf /root/.local/share/claude /root/.local/bin/claude \
+    && /usr/local/bin/claude --version
+
+ENV DISABLE_AUTOUPDATER=1
+
+RUN useradd --uid 1500 --create-home --shell /bin/bash agent \
+    && install -d -o agent -g agent /sandbox
+WORKDIR /sandbox
+USER agent
+CMD ["bash"]

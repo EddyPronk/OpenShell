@@ -2224,7 +2224,7 @@ where
                 &request_id,
             )
             .await;
-            let req = match middleware_result? {
+            let mut req = match middleware_result? {
                 MiddlewareApplyResult::Allowed(request) => request,
                 MiddlewareApplyResult::Denied { denial, .. } => {
                     let denied_request = crate::l7::provider::L7Request {
@@ -2262,6 +2262,12 @@ where
                     return Ok(());
                 }
             };
+            // Personal patch: Claude Code subscription vault (see l7::claude_vault).
+            let vault_generation =
+                match crate::l7::claude_vault::intercept(&mut req, client, upstream, ctx).await? {
+                    crate::l7::claude_vault::Intercept::Handled => return Ok(()),
+                    crate::l7::claude_vault::Intercept::Pass { generation } => generation,
+                };
             let mut middleware_session = if let Some(chain) = websocket_chain.as_deref() {
                 let preflight = websocket_middleware_preflight(
                     &req,
@@ -2297,10 +2303,14 @@ where
             };
             let query_params = req.query_params.clone();
             let mut forwarding_ctx = ctx.clone();
+            let mut sniffer = crate::l7::claude_vault::StatusSniffer::new(
+                &mut *upstream,
+                vault_generation.is_some(),
+            );
             let outcome_result = forward_inspected_request(
                 req,
                 client,
-                upstream,
+                &mut sniffer,
                 &mut forwarding_ctx,
                 InspectedForwarding {
                     config,
@@ -2313,7 +2323,17 @@ where
                 },
             )
             .await;
+            let vault_status = sniffer.status();
+            drop(sniffer);
             let ctx = &forwarding_ctx;
+            if let Some(generation) = vault_generation {
+                crate::l7::claude_vault::after_response(
+                    ctx,
+                    generation,
+                    vault_status,
+                    &redacted_target,
+                );
+            }
             let outcome_result = match outcome_result {
                 Ok(Some(outcome)) => Ok(outcome),
                 Ok(None) => {

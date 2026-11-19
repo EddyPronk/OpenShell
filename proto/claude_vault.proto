@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package openshell.v1;
+
+import "google/protobuf/timestamp.proto";
+import "options.proto";
+
+// Personal patch: the supervisor's Claude vault hands a sign-in recorded in a
+// sandbox to the gateway ("shared login", PLAN.md part 3). A separate service so
+// the main OpenShell service and its test doubles stay unchanged.
+service ClaudeVault {
+  // Called by a sandbox supervisor after Claude Code signed in there. The
+  // gateway accepts it only when the calling sandbox has exactly one attached
+  // provider whose profile annotation `claude-vault.openshell.dev/sign-in` names
+  // `credential_key` and whose credential refreshes with `oauth2_refresh_token`.
+  // It then stores the access token and configures the refresh with
+  // `refresh_material`, replacing any earlier grant.
+  rpc SubmitProviderSignIn(SubmitProviderSignInRequest) returns (SubmitProviderSignInResponse) {
+    option (openshell.options.v1.authorization) = {
+      auth_mode: "sandbox"
+    };
+  }
+}
+
+message SubmitProviderSignInRequest {
+  // Must be the calling supervisor's own sandbox.
+  string sandbox_id = 1;
+  // Provider credential to fill, e.g. CLAUDE_ACCESS_TOKEN.
+  string credential_key = 2;
+  // Secret: the access token from the sign-in response.
+  string access_token = 3;
+  // When the access token expires.
+  google.protobuf.Timestamp expiration_time = 4;
+  // Refresh material for the profile's refresh block, e.g. client_id and
+  // refresh_token. Keys named secret by the profile are stored as secrets.
+  map<string, string> refresh_material = 5;
+  // Non-secret identity of the grant, recorded with the provider for later
+  // policy (no email address): the account and organization UUIDs.
+  string account_uuid = 6;
+  string organization_uuid = 7;
+}
+
+message SubmitProviderSignInResponse {
+  // The provider that now holds the grant.
+  string provider = 1;
+}

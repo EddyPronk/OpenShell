@@ -8,6 +8,9 @@
 //! doing a raw `copy_bidirectional`. Each request within the tunnel is parsed,
 //! evaluated against OPA policy, and either forwarded or denied.
 
+pub(crate) mod claude_vault;
+/// Personal patch: provider keys the supervisor keeps out of the sandbox's environment.
+pub use claude_vault::hidden_env_keys as claude_vault_hidden_env_keys;
 pub mod graphql;
 pub(crate) mod http;
 pub mod jsonrpc;

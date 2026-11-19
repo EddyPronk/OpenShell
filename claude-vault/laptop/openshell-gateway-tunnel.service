@@ -1,0 +1,22 @@
+# User service on a laptop: forwards 127.0.0.1:17671 to the OpenShell gateway on another
+# machine, which listens on its own 127.0.0.1:17670 only. See claude-vault/README.md,
+# "Working from a laptop". Replace gateway-host with that machine's ssh host name.
+#
+#   cp claude-vault/laptop/openshell-gateway-tunnel.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now openshell-gateway-tunnel.service
+#
+# BatchMode: needs an ssh key for gateway-host that works without a prompt (no passphrase, or
+# an agent the user manager can reach, such as GNOME Keyring after desktop login).
+[Unit]
+Description=SSH tunnel to a remote OpenShell gateway (127.0.0.1:17671 -> gateway-host:127.0.0.1:17670)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:17671:127.0.0.1:17670 gateway-host
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

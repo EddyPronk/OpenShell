@@ -1647,6 +1647,22 @@ mod provider_environment_tests {
     }
 }
 
+/// Personal patch (Claude vault): hand a sign-in recorded in this sandbox to the
+/// gateway. Returns the provider that now holds the grant, or the gateway's
+/// status (e.g. `PermissionDenied` when no attached provider's profile allows a
+/// sandbox sign-in). The request carries tokens: never log it.
+pub async fn submit_provider_sign_in(
+    gateway: &GatewayEndpoint,
+    request: crate::proto::SubmitProviderSignInRequest,
+) -> std::result::Result<String, Status> {
+    let channel = connect_channel(gateway)
+        .await
+        .map_err(|_| Status::unavailable("gateway connection failed"))?;
+    let mut client = crate::proto::claude_vault_client::ClaudeVaultClient::new(channel);
+    let response = client.submit_provider_sign_in(request).await?;
+    Ok(response.into_inner().provider)
+}
+
 /// Exchange a provider credential without retaining gateway diagnostics.
 ///
 /// Only a verified TLS connection can establish the provenance of a precise

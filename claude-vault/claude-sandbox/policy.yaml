@@ -1,0 +1,67 @@
+# Sandbox policy for Claude sandboxes (taken from `test` on cm4, 2026-11-19).
+#
+#   openshell sandbox create --name test --from localhost/claude-sandbox:latest \
+#       --provider claude-shared --policy claude-sandbox/policy.yaml
+#
+# OpenShell's default policy plus:
+# - /dev/pts and /dev/tty read-write, so programs in the sandbox can create terminals
+#   (VS Code's terminal, tmux, script). Without them: "forkpty(3) failed".
+#   Filesystem rules can't change after the sandbox starts; they must be here.
+# - GitHub, PyPI, npm and Claude Code's download host for curl, git and claude;
+#   uv's own hosts for ~/.local/bin/uv; VS Code server and extension downloads.
+# The provider's Anthropic endpoints are added by the provider (claude-shared), not here.
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only: [/bin, /usr, /lib, /proc, /dev/urandom, /etc, /var/log]
+  read_write: [/tmp, /dev/null, /dev/pts, /dev/tty]
+landlock:
+  compatibility: best_effort
+network_policies:
+  github:
+    name: github
+    endpoints:
+      - { host: github.com, port: 443 }
+      - { host: api.github.com, port: 443 }
+      - { host: codeload.github.com, port: 443 }
+      - { host: raw.githubusercontent.com, port: 443 }
+      - { host: objects.githubusercontent.com, port: 443 }
+      - { host: release-assets.githubusercontent.com, port: 443 }
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/lib/git-core/git-remote-http }
+      - { path: /usr/lib/git-core/git-remote-https }
+      - { path: /usr/local/bin/claude }
+      - { path: /sandbox/.local/bin/uv }
+  packages:
+    name: packages
+    endpoints:
+      - { host: pypi.org, port: 443 }
+      - { host: files.pythonhosted.org, port: 443 }
+      - { host: registry.npmjs.org, port: 443 }
+      - { host: downloads.claude.ai, port: 443 }
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/lib/git-core/git-remote-http }
+      - { path: /usr/lib/git-core/git-remote-https }
+      - { path: /usr/local/bin/claude }
+      - { path: /sandbox/.local/bin/uv }
+  uv_python:
+    name: uv_python
+    endpoints:
+      - { host: python-build-standalone.astral.sh, port: 443 }
+      - { host: releases.astral.sh, port: 443 }
+    binaries:
+      - { path: /sandbox/.local/bin/uv }
+  vscode:
+    name: vscode
+    endpoints:
+      - { host: update.code.visualstudio.com, port: 443 }
+      - { host: vscode.download.prss.microsoft.com, port: 443 }
+      - { host: main.vscode-cdn.net, port: 443 }
+      - { host: marketplace.visualstudio.com, port: 443 }
+      - { host: "*.gallerycdn.vsassets.io", port: 443 }
+      - { host: "*.gallery.vsassets.io", port: 443 }
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: "/sandbox/.vscode-server/**" }

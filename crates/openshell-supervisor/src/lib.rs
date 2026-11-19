@@ -1309,6 +1309,11 @@ pub async fn run_sandbox_instance(
             |result| initial_provider_credentials(result, &provider_readiness),
         )
     };
+    // Personal patch: the Claude vault's shared token stays in the supervisor.
+    // Suppression survives later provider revisions.
+    for key in openshell_supervisor_network::l7::claude_vault_hidden_env_keys() {
+        provider_credentials.remove_env_key(key);
+    }
 
     if credential_gating_unavailable(
         &loaded_policy_origin,
