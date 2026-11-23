@@ -11,7 +11,7 @@ use crate::sandbox;
 use miette::WrapErr;
 use miette::{IntoDiagnostic, Result};
 use nix::sys::signal::{self, Signal};
-use nix::unistd::{Pid, User};
+use nix::unistd::{Pid, Uid, User};
 use openshell_core::policy::SandboxPolicy;
 use std::collections::HashMap;
 #[cfg(unix)]
@@ -185,8 +185,9 @@ fn inject_provider_env(cmd: &mut Command, provider_env: &HashMap<String, String>
 
 /// Derive the child USER and HOME from the policy's sandbox identity.
 ///
-/// Name-based identities use their passwd entry. Numeric identities have no
-/// reliable passwd entry, so their workspace remains the portable fallback.
+/// Name-based identities use their passwd entry. Numeric identities report the
+/// passwd account name when the uid has one, but have no reliable passwd home,
+/// so their workspace remains the portable fallback.
 pub(crate) fn session_user_and_home(
     policy: &SandboxPolicy,
     workdir_home: Option<&str>,
@@ -194,7 +195,7 @@ pub(crate) fn session_user_and_home(
     let (user, default_home) = match policy.process.run_as_user.as_deref() {
         Some(user) if !user.is_empty() => {
             if user.parse::<u32>().is_ok() {
-                (user.to_string(), "/sandbox".to_string())
+                (numeric_identity_name(user), "/sandbox".to_string())
             } else {
                 let home = User::from_name(user).ok().flatten().map_or_else(
                     || format!("/home/{user}"),
@@ -207,6 +208,15 @@ pub(crate) fn session_user_and_home(
     };
     let home = workdir_home.map_or(default_home, str::to_string);
     (user, home)
+}
+
+/// The account name the image's passwd gives a numeric identity, or the
+/// number itself when there is no entry.
+fn numeric_identity_name(uid: &str) -> String {
+    uid.parse()
+        .ok()
+        .and_then(|uid| User::from_uid(Uid::from_raw(uid)).ok().flatten())
+        .map_or_else(|| uid.to_string(), |entry| entry.name)
 }
 
 fn apply_canonical_process_environment(
@@ -240,6 +250,7 @@ fn apply_canonical_process_environment(
     for (key, value) in [
         ("HOME", session_home.as_str()),
         ("USER", session_user.as_str()),
+        ("LOGNAME", session_user.as_str()),
         ("SHELL", shell.as_str()),
         (
             "TERM",
@@ -1211,6 +1222,72 @@ mod tests {
         let expected_shell = openshell_core::shell::detect_login_shell();
         assert_eq!(variables.get("SHELL"), Some(&expected_shell.as_str()));
         assert_eq!(variables.get("TERM"), Some(&"xterm-256color"));
+    }
+
+    /// Policy whose sandbox identity is the current user's numeric uid.
+    #[cfg(unix)]
+    fn numeric_identity_of_current_user() -> (User, SandboxPolicy) {
+        let current_user = User::from_uid(nix::unistd::geteuid())
+            .expect("look up current user")
+            .expect("current user entry");
+        let policy = policy_with_process(ProcessPolicy {
+            run_as_user: Some(current_user.uid.as_raw().to_string()),
+            run_as_group: None,
+        });
+        (current_user, policy)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn numeric_identity_with_passwd_entry_reports_the_account_name() {
+        let (current_user, policy) = numeric_identity_of_current_user();
+
+        let (user, home) = session_user_and_home(&policy, None);
+
+        assert_eq!(user, current_user.name);
+        // The home fallback for numeric identities is unchanged.
+        assert_eq!(home, "/sandbox");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn numeric_identity_without_passwd_entry_keeps_the_number() {
+        let uid = 4_000_000_000_u32;
+        assert!(
+            User::from_uid(Uid::from_raw(uid))
+                .expect("look up uid")
+                .is_none(),
+            "test precondition: uid {uid} has no passwd entry"
+        );
+        let policy = policy_with_process(ProcessPolicy {
+            run_as_user: Some(uid.to_string()),
+            run_as_group: None,
+        });
+
+        assert_eq!(
+            session_user_and_home(&policy, None),
+            (uid.to_string(), "/sandbox".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_process_names_a_numeric_identity_in_user_and_logname() {
+        let (current_user, policy) = numeric_identity_of_current_user();
+        let mut cmd = Command::new("/usr/bin/env");
+        cmd.env_clear().stdout(StdStdio::piped());
+
+        apply_canonical_process_environment(
+            &mut cmd,
+            &policy,
+            &ResolvedWorkspace::default(),
+            false,
+            &HashMap::new(),
+        );
+
+        let variables = probe_environment(cmd);
+        assert_eq!(variables.get("USER"), Some(&current_user.name));
+        assert_eq!(variables.get("LOGNAME"), Some(&current_user.name));
     }
 
     /// Re-executes the test binary for `test_path` with `env` added to its

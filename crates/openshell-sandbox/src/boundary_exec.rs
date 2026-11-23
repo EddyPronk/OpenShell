@@ -167,7 +167,8 @@ impl LocalBoundaryExec {
             .env_clear()
             .env(openshell_core::sandbox_env::SANDBOX, "1")
             .env("HOME", session_home)
-            .env("USER", session_user)
+            .env("USER", &session_user)
+            .env("LOGNAME", session_user)
             .env("PATH", path)
             .env("TERM", if spec.pty { "xterm-256color" } else { "dumb" });
         if let Some(shell) = openshell_core::shell::find_login_shell() {
@@ -909,6 +910,30 @@ mod tests {
             .filter(|(name, _)| *name == std::ffi::OsStr::new(key))
             .last()
             .and_then(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn exec_children_get_the_account_name_for_a_numeric_identity() {
+        let current_user = nix::unistd::User::from_uid(nix::unistd::geteuid())
+            .expect("look up current user")
+            .expect("current user entry");
+        let mut executor = executor();
+        executor.policy.process.run_as_user = Some(current_user.uid.as_raw().to_string());
+
+        let command = executor
+            .command(&ExecSpec {
+                program: "/bin/true".to_string(),
+                args: Vec::new(),
+                shell: None,
+                runtime_helper: None,
+                env: Vec::new(),
+                workdir: None,
+                pty: false,
+            })
+            .expect("resolve exec");
+
+        assert_eq!(env_of(&command, "USER"), Some(current_user.name.clone()));
+        assert_eq!(env_of(&command, "LOGNAME"), Some(current_user.name));
     }
 
     #[test]
